@@ -1,7 +1,7 @@
-// controllers/chatControllers.js - FIXED SYNTAX AND DEPLOYMENT READY
-import { Chat } from "../models/Chat.js";
-import { Conversation } from "../models/Conversation.js";
-import { Character } from "../models/Character.js";
+// FIXED chatControllers.js - Corrected Import Paths
+import { Chat } from "./Chat.js"; // FIXED: Changed from "../models/Chat.js"
+import { Conversation } from "./Conversation.js"; // FIXED: Changed from "../models/Conversation.js"
+import { Character } from "./Character.js"; // FIXED: Changed from "../models/Character.js"
 
 console.log('🤖 Enhanced Chat Controller Loading...');
 
@@ -368,5 +368,7 @@ export const deleteChat = async (req, res) => {
     });
   }
 };
+
+console.log('✅ Chat Controller Loaded Successfully');
 
 export { generateResponse };
