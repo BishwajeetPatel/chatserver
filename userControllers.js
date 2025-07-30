@@ -1,251 +1,252 @@
-// REAL EMAIL VERSION - Replace your controllers/userControllers.js
-
-import User from "../models/User.js";
+// userControllers.js - User Authentication Controllers
+import User from "./User.js"; // FIXED: Changed from "../models/User.js"
 import jwt from "jsonwebtoken";
-import { sendMail } from "../middlewares/sendMail.js";
+import { sendMail } from "./sendMail.js"; // FIXED: Changed from "../middlewares/sendMail.js"
 
+console.log('👤 User Controllers Loading...');
+
+// Store OTPs temporarily (in production, use Redis or database)
+const otpStore = new Map();
+
+// Generate OTP
 const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000);
+  return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+// Generate JWT Token
+const generateToken = (userId) => {
+  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
+    expiresIn: "30d",
+  });
+};
+
+// Login User (Send OTP)
 export const loginUser = async (req, res) => {
   try {
+    console.log("👤 LOGIN REQUEST - Starting...");
     const { email } = req.body;
 
-    console.log(`\n🔐 === LOGIN REQUEST RECEIVED ===`);
-    console.log(`📧 Email: ${email}`);
-    console.log(`⏰ Time: ${new Date().toISOString()}`);
-
     if (!email) {
-      console.log(`❌ Validation failed: Email is required`);
-      return res.status(400).json({ message: "Email is required" });
+      return res.status(400).json({
+        message: "Email is required"
+      });
     }
 
+    // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      console.log(`❌ Validation failed: Invalid email format`);
-      return res.status(400).json({ message: "Please enter a valid email address" });
+      return res.status(400).json({
+        message: "Please enter a valid email address"
+      });
     }
 
-    const cleanEmail = email.trim().toLowerCase();
-    console.log(`🧹 Cleaned email: ${cleanEmail}`);
+    console.log(`👤 Processing login for: ${email}`);
 
     // Find or create user
-    let user = await User.findOne({ email: cleanEmail });
+    let user = await User.findOne({ email: email.toLowerCase() });
     
     if (!user) {
-      console.log(`👤 Creating new user for: ${cleanEmail}`);
-      user = await User.create({ email: cleanEmail });
+      console.log(`👤 Creating new user: ${email}`);
+      user = await User.create({
+        email: email.toLowerCase()
+      });
       console.log(`✅ New user created with ID: ${user._id}`);
     } else {
-      console.log(`👤 Existing user found with ID: ${user._id}`);
+      console.log(`✅ Existing user found with ID: ${user._id}`);
     }
 
     // Generate OTP
     const otp = generateOTP();
-    console.log(`🔑 Generated OTP: ${otp} for ${cleanEmail}`);
+    console.log(`🔢 Generated OTP: ${otp} for ${email}`);
 
-    // Create verification token
-    const verifyToken = jwt.sign(
-      { 
-        email: cleanEmail, 
-        otp,
-        userId: user._id,
-        generated: new Date().toISOString()
-      },
-      process.env.ACTIVATION_SECRET,
-      { expiresIn: "10m" }
-    );
-
-    console.log(`🎫 Verification token created (expires in 10 minutes)`);
+    // Store OTP with expiration (10 minutes)
+    otpStore.set(email.toLowerCase(), {
+      otp: otp,
+      expires: Date.now() + 10 * 60 * 1000, // 10 minutes
+      userId: user._id
+    });
 
     try {
-      console.log(`📤 === SENDING REAL OTP EMAIL ===`);
-      console.log(`📧 From: ${process.env.EMAIL_USERNAME}`);
-      console.log(`📧 To: ${cleanEmail}`);
-      console.log(`🔢 OTP: ${otp}`);
+      // Send OTP via email
+      console.log(`📧 Sending OTP to: ${email}`);
+      const emailResult = await sendMail(email, otp);
       
-      // Send REAL OTP email
-      const emailResult = await sendMail(cleanEmail, otp);
-      
-      console.log(`\n🎉 === OTP EMAIL SENT SUCCESSFULLY ===`);
-      console.log(`📨 Message ID: ${emailResult.messageId}`);
-      console.log(`📤 Sent from: ${emailResult.sentFrom}`);
-      console.log(`📧 Sent to: ${emailResult.sentTo}`);
-      console.log(`⏰ Timestamp: ${emailResult.timestamp}`);
+      console.log(`✅ OTP sent successfully to ${email}`);
+      console.log(`📨 Email result:`, emailResult);
 
-      // Return success response
-      res.json({
+      res.status(200).json({
         message: "OTP sent to your email successfully",
-        verifyToken,
-        email: cleanEmail,
+        email: email,
+        otpSent: true,
         expiresIn: "10 minutes",
-        emailSent: true,
-        sentFrom: emailResult.sentFrom
+        debug: {
+          userId: user._id,
+          isNewUser: !user.createdAt || (Date.now() - user.createdAt.getTime()) < 5000,
+          emailSentFrom: emailResult.sentFrom
+        }
       });
 
     } catch (emailError) {
-      console.error(`\n❌ === FAILED TO SEND OTP EMAIL ===`);
-      console.error(`❌ Email service error:`, emailError.message);
-      console.error(`❌ Target email: ${cleanEmail}`);
-      console.error(`❌ Configured sender: ${process.env.EMAIL_USERNAME}`);
+      console.error("❌ Email sending failed:", emailError.message);
       
-      return res.status(500).json({
-        message: "Failed to send OTP email. Please try again.",
+      // Clear stored OTP if email fails
+      otpStore.delete(email.toLowerCase());
+      
+      res.status(500).json({
+        message: "Failed to send OTP email",
         error: emailError.message,
-        emailConfigured: !!process.env.EMAIL_USERNAME,
-        senderEmail: process.env.EMAIL_USERNAME,
-        targetEmail: cleanEmail,
-        timestamp: new Date().toISOString()
+        suggestion: "Please check your email address and try again"
       });
     }
 
   } catch (error) {
-    console.error(`\n❌ === LOGIN REQUEST FAILED ===`);
-    console.error(`❌ Error:`, error.message);
-    console.error(`❌ Stack:`, error.stack);
-    
+    console.error("❌ Login error:", error);
     res.status(500).json({
-      message: "Internal server error",
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
-};
-
-export const verifyUser = async (req, res) => {
-  try {
-    const { otp, verifyToken } = req.body;
-
-    console.log(`\n🔍 === OTP VERIFICATION REQUEST ===`);
-    console.log(`🔢 Received OTP: ${otp}`);
-    console.log(`⏰ Time: ${new Date().toISOString()}`);
-
-    if (!otp || !verifyToken) {
-      return res.status(400).json({ 
-        message: "OTP and verification token are required" 
-      });
-    }
-
-    if (!/^\d{6}$/.test(otp)) {
-      console.log(`❌ OTP format validation failed: ${otp}`);
-      return res.status(400).json({ 
-        message: "OTP must be 6 digits" 
-      });
-    }
-
-    try {
-      // Verify the token
-      const decoded = jwt.verify(verifyToken, process.env.ACTIVATION_SECRET);
-      console.log(`✅ Token verified successfully`);
-      console.log(`📧 Token email: ${decoded.email}`);
-      console.log(`🔑 Expected OTP: ${decoded.otp}`);
-      console.log(`🎫 Token generated: ${decoded.generated}`);
-
-      // Check if OTP matches
-      if (Number(otp) !== decoded.otp) {
-        console.log(`❌ OTP mismatch: received=${otp}, expected=${decoded.otp}`);
-        return res.status(400).json({ 
-          message: "Invalid OTP. Please check and try again." 
-        });
-      }
-
-      console.log(`✅ OTP verification successful for: ${decoded.email}`);
-
-      // Find user
-      let user = await User.findOne({ email: decoded.email });
-
-      if (!user) {
-        console.log(`👤 User not found, creating new user for: ${decoded.email}`);
-        user = await User.create({ email: decoded.email });
-      }
-
-      console.log(`👤 User authenticated: ${user._id}`);
-
-      // Generate JWT token for session
-      const token = jwt.sign(
-        { 
-          id: user._id,
-          email: user.email,
-          loginTime: new Date().toISOString()
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: "30d" }
-      );
-
-      console.log(`🎫 Session token generated (expires in 30 days)`);
-      console.log(`\n🎉 === LOGIN SUCCESSFUL ===`);
-      console.log(`👤 User: ${decoded.email}`);
-      console.log(`🆔 User ID: ${user._id}`);
-
-      res.json({
-        message: "Login successful",
-        user: {
-          _id: user._id,
-          email: user.email,
-          createdAt: user.createdAt
-        },
-        token,
-        loginTime: new Date().toISOString()
-      });
-
-    } catch (tokenError) {
-      console.error(`❌ Token verification failed:`, tokenError.message);
-      
-      if (tokenError.name === 'TokenExpiredError') {
-        return res.status(400).json({ 
-          message: "OTP has expired. Please request a new one.",
-          expired: true
-        });
-      }
-      
-      if (tokenError.name === 'JsonWebTokenError') {
-        return res.status(400).json({ 
-          message: "Invalid verification token. Please try login again.",
-          invalid: true
-        });
-      }
-
-      throw tokenError;
-    }
-
-  } catch (error) {
-    console.error(`\n❌ === OTP VERIFICATION FAILED ===`);
-    console.error(`❌ Error:`, error.message);
-    
-    res.status(500).json({
-      message: "Internal server error",
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
-  }
-};
-
-export const getMyProfile = async (req, res) => {
-  try {
-    console.log(`👤 Profile request for user: ${req.user._id}`);
-    
-    const user = await User.findById(req.user._id);
-
-    if (!user) {
-      console.log(`❌ User not found: ${req.user._id}`);
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    console.log(`✅ Profile fetched for: ${user.email}`);
-
-    res.json({
-      _id: user._id,
-      email: user.email,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt
-    });
-
-  } catch (error) {
-    console.error(`❌ Get profile error:`, error);
-    res.status(500).json({ 
-      message: "Internal server error",
+      message: "Login failed",
       error: error.message
     });
   }
 };
+
+// Verify OTP and Login
+export const verifyUser = async (req, res) => {
+  try {
+    console.log("👤 VERIFY OTP REQUEST - Starting...");
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        message: "Email and OTP are required"
+      });
+    }
+
+    console.log(`👤 Verifying OTP for: ${email}`);
+    console.log(`🔢 Provided OTP: ${otp}`);
+
+    // Check if OTP exists and is valid
+    const storedData = otpStore.get(email.toLowerCase());
+    
+    if (!storedData) {
+      console.log(`❌ No OTP found for: ${email}`);
+      return res.status(400).json({
+        message: "OTP not found. Please request a new OTP.",
+        suggestion: "Click 'Send OTP' to get a new verification code"
+      });
+    }
+
+    // Check if OTP has expired
+    if (Date.now() > storedData.expires) {
+      console.log(`❌ OTP expired for: ${email}`);
+      otpStore.delete(email.toLowerCase());
+      return res.status(400).json({
+        message: "OTP has expired. Please request a new OTP.",
+        suggestion: "Click 'Send OTP' to get a new verification code"
+      });
+    }
+
+    // Verify OTP
+    if (storedData.otp !== otp.toString()) {
+      console.log(`❌ Invalid OTP for: ${email}`);
+      console.log(`❌ Expected: ${storedData.otp}, Got: ${otp}`);
+      return res.status(400).json({
+        message: "Invalid OTP. Please check and try again.",
+        suggestion: "Make sure you entered the 6-digit code correctly"
+      });
+    }
+
+    console.log(`✅ OTP verified successfully for: ${email}`);
+
+    // Find user
+    const user = await User.findById(storedData.userId);
+    
+    if (!user) {
+      console.log(`❌ User not found for ID: ${storedData.userId}`);
+      otpStore.delete(email.toLowerCase());
+      return res.status(400).json({
+        message: "User not found. Please try logging in again."
+      });
+    }
+
+    // Generate JWT token
+    const token = generateToken(user._id);
+    console.log(`🎫 JWT token generated for user: ${user._id}`);
+
+    // Clear OTP from store
+    otpStore.delete(email.toLowerCase());
+    console.log(`🧹 OTP cleared for: ${email}`);
+
+    // Import and create default characters for new users
+    try {
+      const { createDefaultCharacters } = await import("./characterControllers.js");
+      const createdCount = await createDefaultCharacters(user._id);
+      console.log(`🎭 Created ${createdCount} default characters for user`);
+    } catch (characterError) {
+      console.log(`⚠️ Could not create default characters:`, characterError.message);
+      // Don't fail login if character creation fails
+    }
+
+    res.status(200).json({
+      message: "Login successful",
+      success: true,
+      token: token,
+      user: {
+        id: user._id,
+        email: user.email,
+        createdAt: user.createdAt
+      },
+      expiresIn: "30 days"
+    });
+
+  } catch (error) {
+    console.error("❌ Verify OTP error:", error);
+    res.status(500).json({
+      message: "OTP verification failed",
+      error: error.message
+    });
+  }
+};
+
+// Get User Profile
+export const getMyProfile = async (req, res) => {
+  try {
+    console.log(`👤 GET PROFILE REQUEST for user: ${req.user._id}`);
+    
+    const user = req.user;
+    
+    res.status(200).json({
+      message: "Profile retrieved successfully",
+      user: {
+        id: user._id,
+        email: user.email,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ Get profile error:", error);
+    res.status(500).json({
+      message: "Failed to retrieve profile",
+      error: error.message
+    });
+  }
+};
+
+// Cleanup expired OTPs (run periodically)
+setInterval(() => {
+  const now = Date.now();
+  let cleanedCount = 0;
+  
+  for (const [email, data] of otpStore.entries()) {
+    if (now > data.expires) {
+      otpStore.delete(email);
+      cleanedCount++;
+    }
+  }
+  
+  if (cleanedCount > 0) {
+    console.log(`🧹 Cleaned up ${cleanedCount} expired OTPs`);
+  }
+}, 5 * 60 * 1000); // Clean every 5 minutes
+
+console.log('✅ User Controllers Loaded Successfully');
