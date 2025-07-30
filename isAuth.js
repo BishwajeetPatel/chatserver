@@ -1,12 +1,15 @@
-// middlewares/isAuth.js - CORRECTED VERSION
+// FIXED isAuth.js - Corrected Import Paths
 import jwt from "jsonwebtoken";
+
+console.log("🔐 ISAUTH MIDDLEWARE LOADING...");
 
 // FIXED: Try both import styles for User model
 let User;
 try {
   // Try named import first
-  const userModule = await import("../models/User.js");
+  const userModule = await import("./User.js"); // FIXED: Changed from "../models/User.js"
   User = userModule.User || userModule.default;
+  console.log("✅ User model imported successfully");
 } catch (error) {
   console.error("❌ Failed to import User model:", error.message);
   throw error;
@@ -82,6 +85,8 @@ const isAuth = async (req, res, next) => {
     });
   }
 };
+
+console.log("✅ ISAUTH MIDDLEWARE LOADED SUCCESSFULLY");
 
 // IMPORTANT: Export as default
 export default isAuth;
