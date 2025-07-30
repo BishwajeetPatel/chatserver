@@ -1,5 +1,5 @@
-// controllers/characterControllers.js - COMPLETE REPLACEMENT WITH OPTIONS ENDPOINT
-import { Character } from "../models/Character.js";
+// FIXED characterControllers.js - Corrected Import Paths for Root Directory
+import { Character } from "./Character.js"; // FIXED: Root directory path
 
 // ✅ NEW: Get character creation options (for frontend form)
 export const getCharacterOptions = async (req, res) => {
